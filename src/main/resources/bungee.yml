@@ -1,0 +1,19 @@
+name: Observer
+version: Beta-0.1
+auther: Mondei1
+database: true
+main: de.Mondei1.bungee.Observer
+
+commands:
+  sync:
+    usage: "/sync"
+    description: "This command will ask the backend for a new config and download them."
+
+permissions:
+  observer.*:
+    description: "A user with this permission can do anything! Give this only people you can trust."
+    children:
+      observer.sync: true
+
+  observer.sync:
+    description: "With this permission, you can sync the config with the backend."

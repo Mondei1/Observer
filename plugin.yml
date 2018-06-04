@@ -1,0 +1,5 @@
+name: Observer
+version: Beta-0.1
+auther: Mondei1
+description: This is the client for Observer that collects and send data to the backend.
+main: de.Mondei1.spigot.Observerrver
