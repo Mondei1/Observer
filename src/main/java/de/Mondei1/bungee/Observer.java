@@ -4,13 +4,24 @@ import de.Mondei1.bungee.commands.Sync;
 import de.Mondei1.bungee.listeners.PlayerListener;
 import de.Mondei1.utils.ConfigManager;
 import de.Mondei1.utils.LogUtil;
+import de.Mondei1.utils.Network;
 import de.Mondei1.utils.backend.BackendManager;
+import net.md_5.bungee.api.ProxyServer;
+import net.md_5.bungee.api.config.ServerInfo;
 import net.md_5.bungee.api.plugin.Plugin;
+import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.Proxy;
+import java.net.SocketException;
 import java.net.URISyntaxException;
+import java.net.UnknownHostException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 public class Observer extends Plugin {
 
     public static Observer instance;
@@ -42,9 +53,31 @@ public class Observer extends Plugin {
             e.printStackTrace();
         }
         try {
-            this.backendManager = new BackendManager("http://" + cfg.backend().get("host") + ":" + cfg.backend().get("port"));
+            JSONObject obj = new JSONObject();
+            JSONArray jsonArray = new JSONArray();
+            // Convert servers map to array.
+            for(String serverName : ProxyServer.getInstance().getServers().keySet()) {
+                JSONObject serverJSON = new JSONObject();
+                ServerInfo server = ProxyServer.getInstance().getServerInfo(serverName);
+                serverJSON.put("name", server.getName());
+                serverJSON.put("port", server.getAddress().getPort());
+                jsonArray.add(serverJSON);
+            }
+            try {
+                obj.put("mac", Network.getMacAddress());
+                obj.put("servers", jsonArray);
+            } catch (UnknownHostException | SocketException e) {
+                e.printStackTrace();
+            }
+            System.out.println("Set obj: " + obj.toString());
+            this.backendManager = new BackendManager("http://" + cfg.backend().get("host") + ":" + cfg.backend().get("port"), false, obj);
         } catch (URISyntaxException e) {
             e.printStackTrace();
+        }
+
+        Map<String, ServerInfo> servers = ProxyServer.getInstance().getServers();
+        for(String server : servers.keySet()) {
+            System.out.println("Port of server " + server + " is " + servers.get(server).getAddress().getPort());
         }
 
         new LogUtil("Setting UncaughtExceptionHandler (get's executed when a unexpected error occur) ...").debug();

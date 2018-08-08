@@ -1,9 +1,5 @@
 package de.Mondei1.utils.backend;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import de.Mondei1.bungee.Observer;
 import de.Mondei1.utils.ConfigManager;
 import de.Mondei1.utils.LogEvents;
 import de.Mondei1.utils.LogUtil;
@@ -18,6 +14,7 @@ import org.apache.http.ParseException;
 import org.apache.http.client.HttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
+import org.bukkit.Bukkit;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
@@ -34,38 +31,53 @@ public class BackendManager {
     private String path;
     private String token;
     private Socket socket;
+    private boolean spigot;     // If server is spigot.
+    private JSONObject data;    // Data of server (Mac-Address, Port)
+    private String sessionID;   // Current session.
     private boolean isConnected;
     private ConfigManager cfg;
 
     private int retrys;
 
-    public BackendManager(String url) throws URISyntaxException {
+    public BackendManager(String url, boolean spigot, JSONObject data) throws URISyntaxException {
         this.token = token;
         this.url = url;
         this.cfg = new ConfigManager();
         this.retrys = 0;
         this.isConnected = false;
+        this.spigot = spigot;
+        this.data = data;
 
         // Get token
         try {
             new LogUtil("Request authentication token ...").debug();
             this.login((res, err) -> {
+                if(res.getStatusLine().getStatusCode() == 401) {
+                    new LogUtil("Server don't let me in (͡ಠ ʖ̯ ͡ಠ). Did you started the Bungeecord first that contains this server? If not, here a little explanation: If you start the Bungeecord, the backend will add all " +
+                            "other servers of the Bungeecord (including this server) to the database to identify which spigot server belongs to which bungeecord.\n\nSo by starting the Bungeecord first this server will be added to hte trusted servers " +
+                            "and the backend will allow this connection. So go and make your job!").event_error(LogEvents.BACKEND);
+                    Bukkit.getPluginManager().disablePlugin(Bukkit.getPluginManager().getPlugin("Observer"));
+                    return;
+                }
+                JSONObject obj = BackendManager.toJSON(res);
                 if(err != null) {
-                    new LogUtil("Something went wrong while login: ").event_error(LogEvents.CONNECTION);
+                    new LogUtil("Something went wrong while login: ").event_error(LogEvents.WEBSOCKET);
                     err.printStackTrace();
                 }
                 if(res.getStatusLine().getStatusCode() != 200) {
-                    new LogUtil("Can't login! Are your user information right?").event_error(LogEvents.CONNECTION);
+                    new LogUtil("Can't login! Are your user information right? Return code: " + res.getStatusLine().getStatusCode()).event_error(LogEvents.BACKEND);
                     return;
                 } else {
-                    new LogUtil("Got token!").event_success(LogEvents.BACKEND);
+                    new LogUtil("Authentication successful. Sessions ID is " + obj.get("sessionID")).event_success(LogEvents.BACKEND);
+                    this.sessionID = obj.get("sessionID").toString();
+                    this.token = obj.get("token").toString();
                 }
             }).get(5, TimeUnit.SECONDS);
         } catch (IOException | InterruptedException | ExecutionException e) {
-            new LogUtil("Woops... Never happend.").error();
+            new LogUtil("Woops... Look! There is a flying elephant over there!").error();
             e.printStackTrace();
         } catch (TimeoutException e) {
-            new LogUtil(new ConfigManager().getPrefix() + "Response from server takes too long!").event_error(LogEvents.CONNECTION);
+            new LogUtil(new ConfigManager().getPrefix() + "Response from server takes too long!").event_error(LogEvents.BACKEND);
         }
 
         // Setup socket after getting token.
@@ -77,31 +89,31 @@ public class BackendManager {
         this.socket = IO.socket(url, options);
 
         socket.on(Socket.EVENT_CONNECT, objects -> {
-            new LogUtil( "Connection to backend established!").event_success(LogEvents.CONNECTION);
+            new LogUtil( "Connection to backend established!").event_success(LogEvents.WEBSOCKET);
             this.isConnected = true;
 
         }).on(Socket.EVENT_DISCONNECT, objects -> {
-            new LogUtil("Connection to backend lost! The reason can be: Wrong token or your server is shut downed.").event_error(LogEvents.CONNECTION);
+            new LogUtil("Connection to backend lost! The reason can be: Wrong token or your server is shut downed.").event_error(LogEvents.WEBSOCKET);
             this.isConnected = false;
 
         }).on(Socket.EVENT_RECONNECT_ATTEMPT, objects -> {
-            new LogUtil("Retry to connect ...").event_error(LogEvents.CONNECTION);
+            new LogUtil("Retry to connect ...").event_error(LogEvents.WEBSOCKET);
             this.isConnected = false;
 
         }).on(Socket.EVENT_RECONNECT_FAILED, objects -> {
             retrys++;
             if (retrys > 4) {
-                new LogUtil(retrys + ". retry failed! Giving up, disable ...").event_error(LogEvents.CONNECTION);
+                new LogUtil(retrys + ". retry failed! Giving up, disable ...").event_error(LogEvents.WEBSOCKET);
                 ProxyServer.getInstance().getPluginManager().getPlugin("Observer").onDisable();
             }
-            new LogUtil(retrys + ". retry failed!").event_error(LogEvents.CONNECTION);
+            new LogUtil(retrys + ". retry failed!").event_error(LogEvents.WEBSOCKET);
         }).on(Socket.EVENT_RECONNECT, objects -> {
-            new LogUtil("Connection established again!").event_success(LogEvents.CONNECTION);
+            new LogUtil("Connection established again!").event_success(LogEvents.WEBSOCKET);
             retrys = 0;
         }).on(Socket.EVENT_CONNECT_TIMEOUT, objects -> {
-            new LogUtil("Timeout. That's not good.").event_error(LogEvents.CONNECTION);
+            new LogUtil("Timeout. That's not good.").event_error(LogEvents.WEBSOCKET);
         }).on(Socket.EVENT_CONNECT_ERROR, objects -> {
-            new LogUtil("Can't connect! Maybe, your token is wrong? But this is impassable.").event_error(LogEvents.CONNECTION);
+            new LogUtil("Can't connect! Maybe, your token is wrong?").event_error(LogEvents.WEBSOCKET);
         // Events
         }).on("get config", get_config::new)
         .on("shutdown", shutdown::new)
@@ -126,21 +138,22 @@ public class BackendManager {
         // Decode string to json.
         try {
             res = EntityUtils.toString(response.getEntity());
-        } catch (IOException e) {
-            e.printStackTrace();
+        } catch (IOException | NullPointerException e) {
+            new LogUtil("Error while parsing string to JSON object. Original data is: " + res).error();
+            return null;
         }
         // If response is an array, cast it, get element 0 and convert it into a JSONObject and return.
         try {
             try {
                 if (parser.parse(res) instanceof JSONArray) return (JSONObject) ((JSONArray) parser.parse(res)).get(0);
             } catch (ParseException e) {
-                e.printStackTrace();
+                new LogUtil("Error while parsing JSON array. Original data is: " + res).error();
             }
         } catch (IndexOutOfBoundsException ex) {
             try {
                 return (JSONObject) parser.parse(res);
             } catch (ParseException e) {
-                e.printStackTrace();
+                new LogUtil("Error while parsing JSON object. Original data is: " + res).error();
             }
         }
         // If everything is fine, convert it and return.
@@ -165,9 +178,15 @@ public class BackendManager {
         this.socket = socket;
     }
 
+    public void setSessionID(String id) { this.sessionID = id; }
+
+    public String getSessionID() {
+        return sessionID;
+    }
+
     public Future<HttpResponse> login(ResponseInterface ri) throws IOException {
         ExecutorService executor = Executors.newCachedThreadPool();
-        return executor.submit(new Login(url, ri, this));
+        return executor.submit(new Login(url, spigot, data, ri, this));
     }
 
     public Future<HttpResponse> post(String endpoint, String body, ResponseInterface ri) throws IOException {

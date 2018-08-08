@@ -1,6 +1,8 @@
 package de.Mondei1.utils.backend;
 
 import de.Mondei1.utils.ConfigManager;
+import de.Mondei1.utils.LogEvents;
+import de.Mondei1.utils.LogUtil;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
 import org.apache.http.client.methods.HttpPost;
@@ -42,10 +44,12 @@ public class Post implements Callable<HttpResponse> {
             if(token != null) req.addHeader("token", token);
             req.addHeader("content-type", "application/json");
             HttpResponse res =  client.execute(req);
+            new LogUtil(this.url + path + "\t\t[" + body.replace("\n", "" ) + "]").event_success(LogEvents.POST);
 
             responseInterface.onResponse(res, null);
             return res;
         } catch (Exception e) {
+            new LogUtil(this.url + path + "\t\t[" + body.replace("\n", "" ) + "]").event_error(LogEvents.POST);
             responseInterface.onResponse(null, e);
             return null;
         }

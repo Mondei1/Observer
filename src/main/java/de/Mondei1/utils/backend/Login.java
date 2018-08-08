@@ -1,11 +1,13 @@
 package de.Mondei1.utils.backend;
 
 import de.Mondei1.utils.ConfigManager;
+import de.Mondei1.utils.LogEvents;
 import de.Mondei1.utils.LogUtil;
 import io.socket.client.Socket;
 import io.socket.emitter.Emitter;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.HttpClientBuilder;
@@ -23,14 +25,19 @@ public class Login implements Callable<HttpResponse> {
     private ConfigManager cfg;
     private ResponseInterface responseInterface;
     private BackendManager backendManager;
+    private JSONObject serverData;
+    private boolean spigot; // If server is Spigot true, else false.
 
     private String url;
 
-    public Login(String url, ResponseInterface responseInterface, BackendManager backendManager) {
+    // For BungeeCord
+    public Login(String url, boolean spigot, JSONObject serverData, ResponseInterface responseInterface, BackendManager backendManager) {
         this.cfg = new ConfigManager();
         this.responseInterface = responseInterface;
         this.backendManager = backendManager;
         this.url = url;
+        this.serverData = serverData;
+        this.spigot = spigot;
 
         this.client = HttpClientBuilder.create().build();
     }
@@ -39,24 +46,23 @@ public class Login implements Callable<HttpResponse> {
     public HttpResponse call() throws IOException, ParseException {
         try {
             // First, get token over normal http request.
-            JSONObject body = new JSONObject();
-            body.put("username", cfg.backend().get("username"));
-            body.put("password", cfg.backend().get("password"));
-            HttpPost req = new HttpPost(this.url + "/auth");
-            StringEntity params = new StringEntity(body.toString());
+            HttpPost req = new HttpPost(this.url + "/apikey");
+            JSONObject obj = new JSONObject();
+            obj.put("key", cfg.backend().get("apikey").toString());
+            if(!spigot) obj.put("bungeecord", serverData);      // Send bungeecord information only If server is bungeecord.
+            else obj.put("spigot", serverData);                 // Send spigot information only If server is spigot.
+            StringEntity params = new StringEntity(obj.toString());
             req.setEntity(params);
             req.addHeader("content-type", "application/json");
             HttpResponse res =  client.execute(req);
-            backendManager.setToken(BackendManager.toJSON(res).get("token").toString());
+            new LogUtil(this.url + "/apikey").event_success(LogEvents.POST);
 
-            if(backendManager.getToken() == null) {
-                responseInterface.onResponse(res, null);
-                return res;
-            }
             responseInterface.onResponse(res, null);
             return res;
         } catch (Exception e) {
+            new LogUtil(this.url + "/apikey").event_error(LogEvents.POST);
             responseInterface.onResponse(null, e);
+            e.printStackTrace();
             return null;
         }
     }
