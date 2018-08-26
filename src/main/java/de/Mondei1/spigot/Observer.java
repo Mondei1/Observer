@@ -100,7 +100,7 @@ public class Observer extends JavaPlugin {
                         // Remove player from timer because he moved.
                         else {
                             afkTimer.remove(p);
-                            lastLoc.put(p, p.getLocation());
+                            lastLoc.put(p, p.getLocation());sync
                         }
                         new LogUtil("Player " + p.getName() + " is afk since " + afkTime + " sec").debug();
                     } else {
